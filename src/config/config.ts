@@ -201,6 +201,16 @@ export type ClawdisConfig = {
       provider?: string;
       /** Model id within provider, e.g. "claude-opus-4-5". */
       model?: string;
+      /**
+       * Optional base URL override for the provider API (proxy/reverse proxy).
+       * Example: "https://proxy.example.com" or "http://127.0.0.1:4000/v1"
+       */
+      baseUrl?: string;
+      /**
+       * Optional environment variable name that contains the provider token/API key.
+       * When set, it is used instead of provider-specific env vars (e.g. OPENAI_API_KEY).
+       */
+      apiKeyEnv?: string;
       /** Optional display-only context window override (used for % in status UIs). */
       contextTokens?: number;
       /** Default thinking level when no /think directive is present. */
@@ -304,6 +314,8 @@ const ClawdisSchema = z.object({
         .object({
           provider: z.string().optional(),
           model: z.string().optional(),
+          baseUrl: z.string().optional(),
+          apiKeyEnv: z.string().optional(),
           contextTokens: z.number().int().positive().optional(),
           thinkingDefault: z
             .union([
@@ -483,6 +495,10 @@ export type ConfigFileSnapshot = {
   issues: ConfigValidationIssue[];
 };
 
+export type LoadConfigOptions = {
+  path?: string;
+};
+
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -519,9 +535,11 @@ function applyIdentityDefaults(cfg: ClawdisConfig): ClawdisConfig {
   return mutated ? next : cfg;
 }
 
-export function loadConfig(): ClawdisConfig {
+export function loadConfig(opts?: LoadConfigOptions): ClawdisConfig {
   // Read config file (JSON5) if present.
-  const configPath = CONFIG_PATH_CLAWDIS;
+  const configPath = opts?.path?.trim()
+    ? String(opts.path).trim()
+    : CONFIG_PATH_CLAWDIS;
   try {
     if (!fs.existsSync(configPath)) return {};
     const raw = fs.readFileSync(configPath, "utf-8");
@@ -573,8 +591,12 @@ export function parseConfigJson5(
   }
 }
 
-export async function readConfigFileSnapshot(): Promise<ConfigFileSnapshot> {
-  const configPath = CONFIG_PATH_CLAWDIS;
+export async function readConfigFileSnapshot(
+  opts?: LoadConfigOptions,
+): Promise<ConfigFileSnapshot> {
+  const configPath = opts?.path?.trim()
+    ? String(opts.path).trim()
+    : CONFIG_PATH_CLAWDIS;
   const exists = fs.existsSync(configPath);
   if (!exists) {
     return {
@@ -640,10 +662,16 @@ export async function readConfigFileSnapshot(): Promise<ConfigFileSnapshot> {
   }
 }
 
-export async function writeConfigFile(cfg: ClawdisConfig) {
-  await fs.promises.mkdir(path.dirname(CONFIG_PATH_CLAWDIS), {
+export async function writeConfigFile(
+  cfg: ClawdisConfig,
+  opts?: LoadConfigOptions,
+) {
+  const configPath = opts?.path?.trim()
+    ? String(opts.path).trim()
+    : CONFIG_PATH_CLAWDIS;
+  await fs.promises.mkdir(path.dirname(configPath), {
     recursive: true,
   });
   const json = JSON.stringify(cfg, null, 2).trimEnd().concat("\n");
-  await fs.promises.writeFile(CONFIG_PATH_CLAWDIS, json, "utf-8");
+  await fs.promises.writeFile(configPath, json, "utf-8");
 }

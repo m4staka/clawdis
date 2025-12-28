@@ -17,6 +17,7 @@ import {
   getProviders,
   type KnownProvider,
   type Model,
+  setApiKey,
 } from "@mariozechner/pi-ai";
 import {
   AgentSession,
@@ -150,7 +151,13 @@ async function ensureSessionHeader(params: {
 
 async function getApiKeyForProvider(
   provider: string,
+  apiKeyEnv?: string,
 ): Promise<string | undefined> {
+  const envName = apiKeyEnv?.trim();
+  if (envName) {
+    const envValue = process.env[envName];
+    if (envValue?.trim()) return envValue.trim();
+  }
   if (provider === "anthropic") {
     const oauthToken = await getAnthropicOAuthToken();
     if (oauthToken) return oauthToken;
@@ -259,7 +266,29 @@ export async function runEmbeddedPiAgent(params: {
     const provider =
       (params.provider ?? DEFAULT_PROVIDER).trim() || DEFAULT_PROVIDER;
     const modelId = (params.model ?? DEFAULT_MODEL).trim() || DEFAULT_MODEL;
-    const model = resolveModel(provider, modelId);
+    const agentCfg = params.config?.inbound?.agent;
+    const baseUrlOverride = agentCfg?.baseUrl?.trim() || undefined;
+    const apiKeyEnv = agentCfg?.apiKeyEnv?.trim() || undefined;
+
+    if (apiKeyEnv) {
+      const envValue = process.env[apiKeyEnv];
+      const trimmed = envValue?.trim();
+      if (!trimmed) {
+        throw new Error(
+          `No API key found in env var "${apiKeyEnv}" (provider "${provider}")`,
+        );
+      }
+      // pi-coding-agent's AgentSession validates API keys using pi-ai's global key lookup,
+      // so we seed that map from our config-driven env var.
+      setApiKey(provider, trimmed);
+    }
+
+    const resolvedModel = resolveModel(provider, modelId);
+    const model = resolvedModel
+      ? baseUrlOverride
+        ? { ...resolvedModel, baseUrl: baseUrlOverride }
+        : resolvedModel
+      : undefined;
     if (!model) {
       throw new Error(`Unknown model: ${provider}/${modelId}`);
     }
@@ -330,10 +359,12 @@ export async function runEmbeddedPiAgent(params: {
         queueMode: settingsManager.getQueueMode(),
         transport: new ProviderTransport({
           getApiKey: async (providerName) => {
-            const key = await getApiKeyForProvider(providerName);
+            const key = await getApiKeyForProvider(providerName, apiKeyEnv);
             if (!key) {
               throw new Error(
-                `No API key found for provider "${providerName}"`,
+                apiKeyEnv
+                  ? `No API key found in env var "${apiKeyEnv}" (provider "${providerName}")`
+                  : `No API key found for provider "${providerName}"`,
               );
             }
             return key;

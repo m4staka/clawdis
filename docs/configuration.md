@@ -110,6 +110,10 @@ Controls the embedded agent runtime (provider/model/thinking/verbose/timeouts).
     agent: {
       provider: "anthropic",
       model: "claude-opus-4-5",
+      // Optional: route requests through a proxy/reverse proxy.
+      baseUrl: "https://proxy.example.com",
+      // Optional: read the token from an env var instead of provider defaults.
+      apiKeyEnv: "MY_PROXY_TOKEN",
       thinkingDefault: "low",
       verboseDefault: "off",
       timeoutSeconds: 600,

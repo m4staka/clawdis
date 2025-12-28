@@ -40,6 +40,10 @@ vi.mock("../auto-reply/reply.js", () => {
   return { getReplyFromConfig: replySpy, __replySpy: replySpy };
 });
 
+vi.mock("../config/config.js", () => ({
+  loadConfig: () => ({}),
+}));
+
 describe("createTelegramBot", () => {
   it("installs grammY throttler", () => {
     createTelegramBot({ token: "tok" });

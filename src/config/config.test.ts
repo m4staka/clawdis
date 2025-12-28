@@ -2,119 +2,107 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-
-async function withTempHome<T>(fn: (home: string) => Promise<T>): Promise<T> {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-config-"));
-  const previousHome = process.env.HOME;
-  process.env.HOME = base;
-  try {
-    return await fn(base);
-  } finally {
-    process.env.HOME = previousHome;
-    await fs.rm(base, { recursive: true, force: true });
-  }
-}
+import { describe, expect, it, vi } from "vitest";
 
 describe("config identity defaults", () => {
-  let previousHome: string | undefined;
-
-  beforeEach(() => {
-    previousHome = process.env.HOME;
-  });
-
-  afterEach(() => {
-    process.env.HOME = previousHome;
-  });
+  async function withTempConfig<T>(
+    config: unknown,
+    fn: (configPath: string) => Promise<T>,
+  ): Promise<T> {
+    const base = await fs.mkdtemp(path.join(os.tmpdir(), "clawdis-config-"));
+    const configPath = path.join(base, "clawdis.json");
+    try {
+      await fs.writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+      return await fn(configPath);
+    } finally {
+      await fs.rm(base, { recursive: true, force: true });
+    }
+  }
 
   it("derives responsePrefix and mentionPatterns when identity is set", async () => {
-    await withTempHome(async (home) => {
-      const configDir = path.join(home, ".clawdis");
-      await fs.mkdir(configDir, { recursive: true });
-      await fs.writeFile(
-        path.join(configDir, "clawdis.json"),
-        JSON.stringify(
-          {
-            identity: { name: "Samantha", theme: "helpful sloth", emoji: "🦥" },
-            inbound: {},
-          },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
+    await withTempConfig(
+      {
+        identity: { name: "Samantha", theme: "helpful sloth", emoji: "🦥" },
+        inbound: {},
+      },
+      async (configPath) => {
+        vi.resetModules();
+        const { loadConfig } = await import("./config.js");
+        const cfg = loadConfig({ path: configPath });
 
-      vi.resetModules();
-      const { loadConfig } = await import("./config.js");
-      const cfg = loadConfig();
-
-      expect(cfg.inbound?.responsePrefix).toBe("🦥");
-      expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual([
-        "\\b@?Samantha\\b",
-      ]);
-    });
+        expect(cfg.inbound?.responsePrefix).toBe("🦥");
+        expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual([
+          "\\b@?Samantha\\b",
+        ]);
+      },
+    );
   });
 
   it("does not override explicit values", async () => {
-    await withTempHome(async (home) => {
-      const configDir = path.join(home, ".clawdis");
-      await fs.mkdir(configDir, { recursive: true });
-      await fs.writeFile(
-        path.join(configDir, "clawdis.json"),
-        JSON.stringify(
-          {
-            identity: {
-              name: "Samantha Sloth",
-              theme: "space lobster",
-              emoji: "🦞",
-            },
-            inbound: {
-              responsePrefix: "✅",
-              groupChat: { mentionPatterns: ["@clawd"] },
-            },
-          },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
+    await withTempConfig(
+      {
+        identity: {
+          name: "Samantha Sloth",
+          theme: "space lobster",
+          emoji: "🦞",
+        },
+        inbound: {
+          responsePrefix: "✅",
+          groupChat: { mentionPatterns: ["@clawd"] },
+        },
+      },
+      async (configPath) => {
+        vi.resetModules();
+        const { loadConfig } = await import("./config.js");
+        const cfg = loadConfig({ path: configPath });
 
-      vi.resetModules();
-      const { loadConfig } = await import("./config.js");
-      const cfg = loadConfig();
-
-      expect(cfg.inbound?.responsePrefix).toBe("✅");
-      expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual(["@clawd"]);
-    });
+        expect(cfg.inbound?.responsePrefix).toBe("✅");
+        expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual(["@clawd"]);
+      },
+    );
   });
 
   it("does not synthesize inbound.agent/session when absent", async () => {
-    await withTempHome(async (home) => {
-      const configDir = path.join(home, ".clawdis");
-      await fs.mkdir(configDir, { recursive: true });
-      await fs.writeFile(
-        path.join(configDir, "clawdis.json"),
-        JSON.stringify(
-          {
-            identity: { name: "Samantha", theme: "helpful sloth", emoji: "🦥" },
-            inbound: {},
+    await withTempConfig(
+      {
+        identity: { name: "Samantha", theme: "helpful sloth", emoji: "🦥" },
+        inbound: {},
+      },
+      async (configPath) => {
+        vi.resetModules();
+        const { loadConfig } = await import("./config.js");
+        const cfg = loadConfig({ path: configPath });
+
+        expect(cfg.inbound?.responsePrefix).toBe("🦥");
+        expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual([
+          "\\b@?Samantha\\b",
+        ]);
+        expect(cfg.inbound?.agent).toBeUndefined();
+        expect(cfg.inbound?.session).toBeUndefined();
+      },
+    );
+  });
+
+  it("loads inbound.agent proxy overrides when present", async () => {
+    await withTempConfig(
+      {
+        inbound: {
+          agent: {
+            provider: "anthropic",
+            model: "claude-opus-4-5",
+            baseUrl: "https://proxy.example.com",
+            apiKeyEnv: "MY_PROXY_TOKEN",
           },
-          null,
-          2,
-        ),
-        "utf-8",
-      );
+        },
+      },
+      async (configPath) => {
+        vi.resetModules();
+        const { loadConfig } = await import("./config.js");
+        const cfg = loadConfig({ path: configPath });
 
-      vi.resetModules();
-      const { loadConfig } = await import("./config.js");
-      const cfg = loadConfig();
-
-      expect(cfg.inbound?.responsePrefix).toBe("🦥");
-      expect(cfg.inbound?.groupChat?.mentionPatterns).toEqual([
-        "\\b@?Samantha\\b",
-      ]);
-      expect(cfg.inbound?.agent).toBeUndefined();
-      expect(cfg.inbound?.session).toBeUndefined();
-    });
+        expect(cfg.inbound?.agent?.baseUrl).toBe("https://proxy.example.com");
+        expect(cfg.inbound?.agent?.apiKeyEnv).toBe("MY_PROXY_TOKEN");
+      },
+    );
   });
 });
